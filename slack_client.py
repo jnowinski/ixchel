@@ -4,7 +4,9 @@ import json
 import datetime
 import time
 import os
-from slackclient import SlackClient
+import slack
+import asyncio
+import concurrent
 
 
 class Slack:
@@ -13,53 +15,38 @@ class Slack:
         self.ixchel = ixchel
         self.config = ixchel.config
         self.token = self.config.get('slack', 'token')
-        self.channel = self.config.get('slack', 'channel')
+        self.channel = self.config.get('slack', 'channel_name')
         self.username = self.config.get('slack', 'username')
         self.dt_last_ping = datetime.datetime.now()
         self.ping_delay_s = float(self.config.get('slack', 'ping_delay_s', 5))
         self.reconnect_delay_s = float(self.config.get(
             'slack', 'reconnect_delay_s', 10))
-        self.connected = False
-        # init the slack client
-        self.sc = SlackClient(self.token)
+        self.loop = asyncio.get_event_loop()
+        # this is probably not needed anymore, but I am hanging on to it for now
+        self.connected = True
+        # init the slack client (RTM and Web Client)
+        self.rtm = slack.RTMClient(
+            token=self.token, ping_interval=self.ping_delay_s, auto_reconnect=True, run_async=True)
+        self.web = slack.WebClient(
+            token=self.token, run_async=False, use_sync_aiohttp=False)
 
-    def connect(self):
+    # def send_typing(self, channel=None):
+    #     # use default values if none sent
+    #     if channel == None:
+    #         channel = self.channel
+    #     try:
+    #         self.rtm.typing(channel)
+    #     except Exception as e:
+    #         self.logger.error('Could not send typing. Exception (%s).' % e)
+
+    def is_connected(self):
         try:
-            self.connected = self.sc.rtm_connect()
-        except Exception as e:
-            self.logger.error('Connect failed. Exception (%s).' % e)
-            self.connected = False
-
-    def ping(self):
-        if (datetime.datetime.now() - self.dt_last_ping).total_seconds() > self.ping_delay_s:
-            try:
-                self.sc.server.websocket.send(json.dumps({"type": "ping"}))
-                self.dt_last_ping = datetime.datetime.now()
-                return True
-            except Exception as e:
-                self.logger.error('Ping failed. Exception (%s).' % e)
-                self.connected = False
-                return False
-
-    def send_typing(self, channel=None):
-        # use default values if none sent
-        if channel == None:
-            channel = self.channel
-        typing_event_json = {
-            "id": 1,
-            "type": "typing",
-            "channel": self.get_channel_id(channel)
-        }
-        self.sc.server.websocket.send(json.dumps(typing_event_json))
-
-    def read_messages(self):
-        try:
-            return self.sc.rtm_read()
-        except Exception as e:
+            self.rtm.ping()
+            return True
+        except SlackClientNotConnectedError as e:
             self.logger.error(
-                'Read messages failed. Exception (%s).' % e)
-            self.connected = False
-            return []
+                'Slack RTM client is not connected. Exception (%s).' % e)
+            return False
 
     def send_block_message(self, block_message, channel=None, username=None):
         if not self.connected:
@@ -72,7 +59,7 @@ class Slack:
         if username == None:
             username = self.username
         try:
-            self.sc.api_call(
+            self.web.api_call(
                 "chat.postMessage",
                 channel=channel,
                 blocks=json.loads(block_message),
@@ -95,8 +82,7 @@ class Slack:
         if username == None:
             username = self.username
         try:
-            self.sc.api_call(
-                "chat.postMessage",
+            self.web.chat_postMessage(
                 channel=channel,
                 text=message,
                 username=username,
@@ -136,7 +122,7 @@ class Slack:
 
     def get_channels(self):
         try:
-            result = self.sc.api_call("channels.list")
+            result = self.web.api_call("channels.list")
             return result['channels']
         except Exception as e:
             self.logger.error(
@@ -155,7 +141,7 @@ class Slack:
 
     def get_users(self):
         try:
-            result = self.sc.api_call("users.list")
+            result = self.web.api_call("users.list")
             return result['members']
         except Exception as e:
             self.logger.error(
