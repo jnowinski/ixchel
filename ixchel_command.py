@@ -876,6 +876,10 @@ class IxchelCommand:
                 'OpenWeatherMap API request (%s) failed (%d).' % (url, r.status_code))
             self.handle_error(command.group(0), e)
 
+    def nudge(self, command, user):
+        nudgeMessage = "Nudge command successfully recognized"
+        self.slack.send_message(nudgeMessage)
+
     def init_commands(self):
         try:
             #self.logger.debug(r'^\\image\s([0-9]+)\s(1|2)\s(%s)$'%'|'.join(self.config.get('telescope', 'filters').split('\n')))
@@ -1082,6 +1086,12 @@ class IxchelCommand:
                     'regex': r'^\\bias\s(1|2)$',
                     'function': self.get_bias,
                     'description': '`\\bias <binning>` takes a bias frame',
+                    'hide': False
+                },
+                {
+                    'regex': r'^\\nudge(\s[0-9\:\-\+\.]+)(\s[0-9\:\-\+\.]+)$',
+                    'function': self.nudge,
+                    'description': '`\\point <ΔRA> <ΔDEC>` shifts where the telescope is pointing',
                     'hide': False
                 }
             ]
